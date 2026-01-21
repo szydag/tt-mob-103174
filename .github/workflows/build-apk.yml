@@ -1,0 +1,61 @@
+name: Build APK/IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build'
+        required: true
+        default: 'android'
+      profile:
+        description: 'Build profile'
+        required: true
+        default: 'preview'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: npm install
+      - run: |
+          PROFILE="${{ github.event.inputs.profile }}"
+          eas build --platform ${{ github.event.inputs.platform }} --profile $PROFILE --non-interactive --wait
+          echo "Build completed"
+      - name: Download APK from EAS
+        run: |
+          BUILD_URL=$(eas build:list --platform=android --limit=1 --json | jq -r '.[0].artifacts.buildUrl')
+          echo "Downloading APK from: $BUILD_URL"
+          curl -L -o app-release.apk "$BUILD_URL"
+          ls -lh app-release.apk
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          release_name: Release v1.0.${{ github.run_number }}
+          body: |
+            Automated APK build
+            - Platform: ${{ github.event.inputs.platform }}
+            - Profile: ${{ github.event.inputs.profile }}
+          draft: false
+          prerelease: false
+      - name: Upload APK to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./app-release.apk
+          asset_name: app-release.apk
+          asset_content_type: application/vnd.android.package-archive
